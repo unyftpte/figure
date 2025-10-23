@@ -1,3 +1,369 @@
+# Proyek Pertama — Predictive Analytics (Domain: Keuangan)
+
+**Aset**: `SPY` — Synthetic Sample (CSV)
+
+**Periode Data**: 2015-01-01 s.d. 2025-10-23  
+**Ukuran Data (mentah)**: 1200 baris × 6 kolom  
+
+## 1. Domain Proyek
+
+Pergerakan harga harian bersifat volatil dan penuh noise. Namun pola teknikal jangka pendek sering dimanfaatkan untuk membantu keputusan trading dan manajemen risiko. Proyek ini memformulasikan tugas **klasifikasi**: apakah *return* harian **besok** positif (naik) atau tidak. Machine Learning relevan karena dapat memadukan banyak fitur teknikal dan divalidasi historis secara sistematis (backtest) untuk menilai dampak praktis.
+
+**Referensi**
+
+- Hastie, Tibshirani, Friedman (2009) *The Elements of Statistical Learning*. Springer.
+- López de Prado (2018) *Advances in Financial Machine Learning*. Wiley.
+
+## 2. Business Understanding
+
+**Problem Statements**
+
+- Dapatkah kita memprediksi arah return besok?
+- Fitur teknikal apa yang paling berkontribusi?
+
+**Goals (terukur)**
+
+- **ROC AUC > 0.55** pada test set (di atas baseline acak 0.50).
+- **F1 ≥ 0.50** (via tuning threshold).
+- Dampak praktis ditunjukkan melalui backtest (growth of $1).
+
+**Solution Statements**
+
+- Uji 3 algoritma (LogReg, RF, GB) + **TimeSeriesSplit(CV=5)** + **RandomizedSearchCV** (scoring=ROC AUC).
+- Tuning threshold (Youden & grid F1) untuk keputusan yang selaras tujuan bisnis.
+
+## 3. Data Understanding
+
+- **Sumber data**: CSV sintetis otomatis (dibuat oleh pipeline jika belum ada).
+
+- **Missing value ada?** Tidak (total sel NA: 0)  
+- **Baris duplikat**: 0  
+- **Outlier check (returns)**: metode z-score |z|>5 pada daily returns; jumlah terdeteksi: 0  
+
+**Uraian Seluruh Fitur**
+
+- **Open/High/Low/Close/Adj Close/Volume**: OHLCV standar.
+- **Return**: Persentase perubahan harian pada `Adj Close`.
+- **SMA_w / EMA_w**: Rata-rata bergerak sederhana & eksponensial (w={5,10,20,50}).
+- **ROC_w**: Rate of Change (momentum) selama w hari.
+- **Volatility_w**: Simpangan baku rolling dari `Return` (w={5,10,20}).
+- **RSI_14**: Relative Strength Index periode 14.
+- **MACD / MACD_Signal / MACD_Hist**: Indikator MACD (12-26-9).
+- **Target_Return_1d**: Return hari ke-(t+1).
+- **Target_Up**: Label biner 1 jika `Target_Return_1d` > 0, else 0.
+
+**Visual EDA**
+
+![EDA Price](./figures/eda_price.png)
+
+![EDA Volume](./figures/eda_volume.png)
+
+![EDA Correlation](./figures/eda_corr.png)
+
+## 4. Data Preparation
+
+1) Normalisasi kolom harga (tahan MultiIndex & variasi nama; fallback Close/Adj Close).  
+2) Feature engineering: SMA/EMA (5,10,20,50), ROC, Volatility (5,10,20), RSI-14, MACD.  
+3) Pembuatan target: `Target_Up` dari return (t+1).  
+4) Drop NaN dari efek rolling.  
+5) Splitting berdasarkan waktu: train/test = 80%/20%.  
+
+## 5. Modeling
+
+**Model 1 — Logistic Regression**  
+- Cara kerja: pemisahan linear (probabilitas logit).  
+- Pipeline: StandardScaler → LogisticRegression(max_iter=1000).  
+- Tuning: `C` (1e-3…1e2), penalty=`l2`, solver=`lbfgs`.  
+
+**Model 2 — Random Forest**  
+- Cara kerja: ansambel pohon keputusan (bagging), menangkap non-linearitas.  
+- Tuning: `n_estimators`, `max_depth`, `min_samples_split`, `min_samples_leaf`, `max_features`.  
+
+**Model 3 — Gradient Boosting**  
+- Cara kerja: boosting bertahap atas pohon lemah untuk menurunkan loss.  
+- Tuning: `n_estimators`, `learning_rate`, `max_depth`, `subsample`.  
+
+Validasi: **TimeSeriesSplit (CV=5)**. Pencarian: **RandomizedSearchCV** dengan skor **ROC AUC**.
+
+## 6. Evaluation
+
+**Metrik & Rumus Singkat**  
+- Precision=TP/(TP+FP), Recall=TP/(TP+FN), F1=2·(P·R)/(P+R).  
+- ROC AUC: area di bawah ROC (baseline acak≈0.50).  
+
+**Ringkas Metrik Test Set**
+
+|  | accuracy | precision | recall | f1 | roc_auc |
+| --- | --- | --- | --- | --- | --- |
+| gb | 0.4934 | 0.5909 | 0.3047 | 0.4021 | 0.5456 |
+| rf | 0.5240 | 0.5941 | 0.4688 | 0.5240 | 0.5319 |
+| logreg | 0.5022 | 0.5380 | 0.7734 | 0.6346 | 0.4642 |
+
+### Hasil Model — LOGREG
+
+**Best Params**
+
+```json
+{
+  "clf__solver": "lbfgs",
+  "clf__penalty": "l2",
+  "clf__C": 0.0020235896477251575
+}
+```
+
+**Classification Report**
+
+```
+              precision    recall  f1-score   support
+
+           0       0.36      0.16      0.22       101
+           1       0.54      0.77      0.63       128
+
+    accuracy                           0.50       229
+   macro avg       0.45      0.47      0.43       229
+weighted avg       0.46      0.50      0.45       229
+
+```
+
+**Confusion Matrix**
+
+![Confusion logreg](./figures/confusion_logreg.png)
+
+**ROC Curve**
+
+![ROC logreg](./figures/roc_logreg.png)
+
+**Threshold Tuning**
+
+- Youden's J best threshold: **0.525**  
+- F1-best threshold: **0.200** (F1=0.7171)
+
+**Backtest (Threshold F1 Terbaik)**
+
+- Final Value (Strategy thr*): 1.3058  
+- Final Value (Buy & Hold): 1.3058
+
+![Backtest F1 logreg](./figures/backtest_logreg_thrF1.png)
+
+**Top Feature Importance (Model-based)**
+
+![FI logreg](./figures/featimp_logreg.png)
+
+**Top Permutation Importance (F1)**
+
+![PI logreg](./figures/permimp_logreg.png)
+
+Top-10 fitur (Permutation Importance, rata-rata):
+
+| Feature | Mean ΔF1 |
+| --- | --- |
+| RSI_14 | 0.0055 |
+| SMA_50 | 0.0038 |
+| ROC_10 | 0.0034 |
+| EMA_50 | 0.0033 |
+| Volatility_5 | 0.0027 |
+| ROC_20 | 0.0017 |
+| MACD_Hist | 0.0009 |
+| Open | 0.0006 |
+| High | 0.0006 |
+| Low | 0.0006 |
+
+**Backtest (Threshold 0.5)**
+
+- Final Value (Strategy): 1.1448  
+- Final Value (Buy & Hold): 1.3058
+
+![Backtest logreg](./figures/backtest_logreg.png)
+
+### Hasil Model — RF
+
+**Best Params**
+
+```json
+{
+  "clf__n_estimators": 150,
+  "clf__min_samples_split": 2,
+  "clf__min_samples_leaf": 3,
+  "clf__max_features": null,
+  "clf__max_depth": 14
+}
+```
+
+**Classification Report**
+
+```
+              precision    recall  f1-score   support
+
+           0       0.47      0.59      0.52       101
+           1       0.59      0.47      0.52       128
+
+    accuracy                           0.52       229
+   macro avg       0.53      0.53      0.52       229
+weighted avg       0.54      0.52      0.52       229
+
+```
+
+**Confusion Matrix**
+
+![Confusion rf](./figures/confusion_rf.png)
+
+**ROC Curve**
+
+![ROC rf](./figures/roc_rf.png)
+
+**Threshold Tuning**
+
+- Youden's J best threshold: **0.503**  
+- F1-best threshold: **0.325** (F1=0.7236)
+
+**Backtest (Threshold F1 Terbaik)**
+
+- Final Value (Strategy thr*): 1.3276  
+- Final Value (Buy & Hold): 1.3058
+
+![Backtest F1 rf](./figures/backtest_rf_thrF1.png)
+
+**Top Feature Importance (Model-based)**
+
+![FI rf](./figures/featimp_rf.png)
+
+**Top Permutation Importance (F1)**
+
+![PI rf](./figures/permimp_rf.png)
+
+Top-10 fitur (Permutation Importance, rata-rata):
+
+| Feature | Mean ΔF1 |
+| --- | --- |
+| MACD_Hist | 0.0444 |
+| Volatility_10 | 0.0345 |
+| ROC_50 | 0.0301 |
+| ROC_5 | 0.0298 |
+| Volume | 0.0258 |
+| Volatility_5 | 0.0250 |
+| Return | 0.0227 |
+| ROC_10 | 0.0212 |
+| MACD_Signal | 0.0155 |
+| ROC_20 | 0.0146 |
+
+**Backtest (Threshold 0.5)**
+
+- Final Value (Strategy): 1.2094  
+- Final Value (Buy & Hold): 1.3058
+
+![Backtest rf](./figures/backtest_rf.png)
+
+### Hasil Model — GB
+
+**Best Params**
+
+```json
+{
+  "clf__subsample": 0.75,
+  "clf__n_estimators": 300,
+  "clf__max_depth": 5,
+  "clf__learning_rate": 0.23999999999999996
+}
+```
+
+**Classification Report**
+
+```
+              precision    recall  f1-score   support
+
+           0       0.45      0.73      0.56       101
+           1       0.59      0.30      0.40       128
+
+    accuracy                           0.49       229
+   macro avg       0.52      0.52      0.48       229
+weighted avg       0.53      0.49      0.47       229
+
+```
+
+**Confusion Matrix**
+
+![Confusion gb](./figures/confusion_gb.png)
+
+**ROC Curve**
+
+![ROC gb](./figures/roc_gb.png)
+
+**Threshold Tuning**
+
+- Youden's J best threshold: **0.012**  
+- F1-best threshold: **0.200** (F1=0.5110)
+
+**Backtest (Threshold F1 Terbaik)**
+
+- Final Value (Strategy thr*): 1.0860  
+- Final Value (Buy & Hold): 1.3058
+
+![Backtest F1 gb](./figures/backtest_gb_thrF1.png)
+
+**Top Feature Importance (Model-based)**
+
+![FI gb](./figures/featimp_gb.png)
+
+**Top Permutation Importance (F1)**
+
+![PI gb](./figures/permimp_gb.png)
+
+Top-10 fitur (Permutation Importance, rata-rata):
+
+| Feature | Mean ΔF1 |
+| --- | --- |
+| ROC_10 | 0.0380 |
+| ROC_5 | 0.0366 |
+| MACD_Hist | 0.0288 |
+| Volume | 0.0162 |
+| EMA_5 | 0.0002 |
+| EMA_10 | 0.0000 |
+| SMA_50 | 0.0000 |
+| SMA_5 | 0.0000 |
+| EMA_20 | 0.0000 |
+| EMA_50 | 0.0000 |
+
+**Backtest (Threshold 0.5)**
+
+- Final Value (Strategy): 1.0616  
+- Final Value (Buy & Hold): 1.3058
+
+![Backtest gb](./figures/backtest_gb.png)
+
+## 7. Kesimpulan
+
+**Model terbaik (ROC AUC, test)**: **GB**.  
+Pencapaian terhadap Goals: F1 ≥ 0.50.  
+
+**Keterkaitan ke Business Understanding**  
+- Problem terjawab: model memberi probabilitas arah return (besok) → dapat dipakai sebagai sinyal.  
+- Goals: sebagian/seluruhnya tercapai berdasarkan ROC AUC & F1.  
+- Dampak solusi: threshold tuning menunjukkan trade-off P/R dan dampaknya ke backtest (growth of $1).  
+
+**Rekomendasi**  
+- Walk-forward multi-window; uji stabilitas.  
+- Tambah variabel makro/sentimen; biaya transaksi & metrik risiko (max drawdown, Sharpe).  
+- Kalibrasi probabilitas (Platt/Isotonic) untuk konsistensi threshold.  
+
+## Lampiran
+
+**Lingkungan Eksekusi**
+
+```json
+{
+  "python": "3.13.9",
+  "platform": "Windows-11-10.0.26100-SP0",
+  "numpy": "2.3.4",
+  "pandas": "2.3.3",
+  "sklearn": "1.7.2",
+  "matplotlib": "3.10.7",
+  "yfinance_available": true
+}
+```
+
+**Sumber Data**
+
+- **Sumber data**: CSV sintetis otomatis (dibuat oleh pipeline jika belum ada).
 
 
 <img width="1184" height="582" alt="backtest_logreg_thrF1" src="https://github.com/user-attachments/assets/526df765-f564-4e7f-9cf6-a8fb3b8492d8" />
