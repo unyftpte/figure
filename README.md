@@ -1,4 +1,4 @@
-# figure
+
 
 <img width="1184" height="582" alt="backtest_logreg_thrF1" src="https://github.com/user-attachments/assets/526df765-f564-4e7f-9cf6-a8fb3b8492d8" />
 <img width="1184" height="582" alt="backtest_logreg" src="https://github.com/user-attachments/assets/81a0856b-18a4-47e8-9905-4d39e0823c51" />
