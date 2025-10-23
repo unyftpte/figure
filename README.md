@@ -54,36 +54,44 @@ Pergerakan harga harian bersifat volatil dan penuh noise. Namun pola teknikal ja
 
 **Visual EDA**
 
-![EDA Price](./figures/eda_price.png)
+![EDA Price](https://raw.githubusercontent.com/unyftpte/figure/main/eda_price.png)
 
-![EDA Volume](./figures/eda_volume.png)
+![EDA Volume](https://raw.githubusercontent.com/unyftpte/figure/main/eda_volume.png)
 
-![EDA Correlation](./figures/eda_corr.png)
+![EDA Correlation](https://raw.githubusercontent.com/unyftpte/figure/main/eda_corr.png)
 
 ## 4. Data Preparation
 
-1) Normalisasi kolom harga (tahan MultiIndex & variasi nama; fallback Close/Adj Close).  
-2) Feature engineering: SMA/EMA (5,10,20,50), ROC, Volatility (5,10,20), RSI-14, MACD.  
-3) Pembuatan target: `Target_Up` dari return (t+1).  
-4) Drop NaN dari efek rolling.  
-5) Splitting berdasarkan waktu: train/test = 80%/20%.  
+Tahapan yang dilakukan (sesuai eksekusi notebook/pipeline):
+
+1) **Normalisasi kolom harga**: menangani variasi nama kolom & MultiIndex dari yfinance/CSV. Jika hanya ada satu kolom harga, dipetakan sebagai `Close`/`Adj Close`. Missing di-drop.
+2) **Feature Engineering**: membuat fitur teknikal — SMA/EMA (5,10,20,50), ROC, Volatility (5,10,20), RSI-14, MACD. Semua fitur dihitung dari `Adj Close` lalu baris awal yang terkena efek rolling di-drop.
+3) **Label/Target**: `Target_Return_1d` = return t→t+1; `Target_Up`=1 bila return > 0. Target dibuat dengan `.shift(-1)` untuk memprediksi **besok** sehingga **mencegah data leakage**.
+4) **Split Train/Test berbasis waktu**: proporsi train/test = 80%/20%. Split dilakukan dengan memotong di tengah indeks waktu (bukan acak) agar menghormati urutan kronologis.
+5) **Scaling fitur**: khusus untuk Logistic Regression dilakukan `StandardScaler` di dalam `Pipeline`, supaya scaler hanya fit di train (menghindari kebocoran) dan otomatis terpakai saat inferensi.
 
 ## 5. Modeling
 
 **Model 1 — Logistic Regression**  
-- Cara kerja: pemisahan linear (probabilitas logit).  
-- Pipeline: StandardScaler → LogisticRegression(max_iter=1000).  
-- Tuning: `C` (1e-3…1e2), penalty=`l2`, solver=`lbfgs`.  
+- **Cara kerja**: memodelkan peluang kelas (Up=1) via fungsi logit; batas keputusan dapat dituning lewat threshold.  
+- **Pipeline**: `StandardScaler` → `LogisticRegression(max_iter=1000, solver='lbfgs', penalty='l2')`.  
+- **Parameter yang dituning**: `C ∈ [1e-3, 1e2]` (skala log).  
+- **Parameter default lain (dipakai)**: `class_weight=None`, `fit_intercept=True`, `n_jobs=None`.  
 
-**Model 2 — Random Forest**  
-- Cara kerja: ansambel pohon keputusan (bagging), menangkap non-linearitas.  
-- Tuning: `n_estimators`, `max_depth`, `min_samples_split`, `min_samples_leaf`, `max_features`.  
+**Model 2 — Random Forest (RF)**  
+- **Cara kerja**: ansambel banyak decision tree (bagging) untuk menurunkan varians dan menangkap non-linearitas.  
+- **Parameter yang dituning**: `n_estimators` (100–600), `max_depth` (None/3–20), `min_samples_split` (2–10), `min_samples_leaf` (1–10), `max_features` ('sqrt'/'log2'/None).  
+- **Parameter default lain (dipakai)**: `bootstrap=True`, `criterion='gini'`, `oob_score=False`, `n_jobs=None`.  
 
-**Model 3 — Gradient Boosting**  
-- Cara kerja: boosting bertahap atas pohon lemah untuk menurunkan loss.  
-- Tuning: `n_estimators`, `learning_rate`, `max_depth`, `subsample`.  
+**Model 3 — Gradient Boosting (GB)**  
+- **Cara kerja**: boosting bertahap pohon-pohon kecil (weak learners) untuk meminimalkan loss secara aditif.  
+- **Parameter yang dituning**: `n_estimators` (50–400), `learning_rate` (0.01–0.3), `max_depth` (2–6), `subsample` (0.6–1.0).  
+- **Parameter default lain (dipakai)**: `loss='log_loss'` (versi terbaru), `max_features=None`.  
 
-Validasi: **TimeSeriesSplit (CV=5)**. Pencarian: **RandomizedSearchCV** dengan skor **ROC AUC**.
+**Validasi & Pencarian**  
+- **Validasi**: `TimeSeriesSplit(CV=5)` (menghormati urutan waktu, menghindari kebocoran).  
+- **Pencarian hyperparameter**: `RandomizedSearchCV(scoring='roc_auc', n_iter=25, random_state=42)`.  
+- **Pelaporan parameter**: setiap model menampilkan **Best Params** (JSON) pada bagian hasil model.
 
 ## 6. Evaluation
 
@@ -127,11 +135,11 @@ weighted avg       0.46      0.50      0.45       229
 
 **Confusion Matrix**
 
-![Confusion logreg](./figures/confusion_logreg.png)
+![Confusion logreg](https://raw.githubusercontent.com/unyftpte/figure/main/confusion_logreg.png)
 
 **ROC Curve**
 
-![ROC logreg](./figures/roc_logreg.png)
+![ROC logreg](https://raw.githubusercontent.com/unyftpte/figure/main/roc_logreg.png)
 
 **Threshold Tuning**
 
@@ -143,15 +151,15 @@ weighted avg       0.46      0.50      0.45       229
 - Final Value (Strategy thr*): 1.3058  
 - Final Value (Buy & Hold): 1.3058
 
-![Backtest F1 logreg](./figures/backtest_logreg_thrF1.png)
+![Backtest F1 logreg](https://raw.githubusercontent.com/unyftpte/figure/main/backtest_logreg_thrF1.png)
 
 **Top Feature Importance (Model-based)**
 
-![FI logreg](./figures/featimp_logreg.png)
+![FI logreg](https://raw.githubusercontent.com/unyftpte/figure/main/featimp_logreg.png)
 
 **Top Permutation Importance (F1)**
 
-![PI logreg](./figures/permimp_logreg.png)
+![PI logreg](https://raw.githubusercontent.com/unyftpte/figure/main/permimp_logreg.png)
 
 Top-10 fitur (Permutation Importance, rata-rata):
 
@@ -173,7 +181,7 @@ Top-10 fitur (Permutation Importance, rata-rata):
 - Final Value (Strategy): 1.1448  
 - Final Value (Buy & Hold): 1.3058
 
-![Backtest logreg](./figures/backtest_logreg.png)
+![Backtest logreg](https://raw.githubusercontent.com/unyftpte/figure/main/backtest_logreg.png)
 
 ### Hasil Model — RF
 
@@ -205,11 +213,11 @@ weighted avg       0.54      0.52      0.52       229
 
 **Confusion Matrix**
 
-![Confusion rf](./figures/confusion_rf.png)
+![Confusion rf](https://raw.githubusercontent.com/unyftpte/figure/main/confusion_rf.png)
 
 **ROC Curve**
 
-![ROC rf](./figures/roc_rf.png)
+![ROC rf](https://raw.githubusercontent.com/unyftpte/figure/main/roc_rf.png)
 
 **Threshold Tuning**
 
@@ -221,15 +229,15 @@ weighted avg       0.54      0.52      0.52       229
 - Final Value (Strategy thr*): 1.3276  
 - Final Value (Buy & Hold): 1.3058
 
-![Backtest F1 rf](./figures/backtest_rf_thrF1.png)
+![Backtest F1 rf](https://raw.githubusercontent.com/unyftpte/figure/main/backtest_rf_thrF1.png)
 
 **Top Feature Importance (Model-based)**
 
-![FI rf](./figures/featimp_rf.png)
+![FI rf](https://raw.githubusercontent.com/unyftpte/figure/main/featimp_rf.png)
 
 **Top Permutation Importance (F1)**
 
-![PI rf](./figures/permimp_rf.png)
+![PI rf](https://raw.githubusercontent.com/unyftpte/figure/main/permimp_rf.png)
 
 Top-10 fitur (Permutation Importance, rata-rata):
 
@@ -251,7 +259,7 @@ Top-10 fitur (Permutation Importance, rata-rata):
 - Final Value (Strategy): 1.2094  
 - Final Value (Buy & Hold): 1.3058
 
-![Backtest rf](./figures/backtest_rf.png)
+![Backtest rf](https://raw.githubusercontent.com/unyftpte/figure/main/backtest_rf.png)
 
 ### Hasil Model — GB
 
@@ -282,11 +290,11 @@ weighted avg       0.53      0.49      0.47       229
 
 **Confusion Matrix**
 
-![Confusion gb](./figures/confusion_gb.png)
+![Confusion gb](https://raw.githubusercontent.com/unyftpte/figure/main/confusion_gb.png)
 
 **ROC Curve**
 
-![ROC gb](./figures/roc_gb.png)
+![ROC gb](https://raw.githubusercontent.com/unyftpte/figure/main/roc_gb.png)
 
 **Threshold Tuning**
 
@@ -298,15 +306,15 @@ weighted avg       0.53      0.49      0.47       229
 - Final Value (Strategy thr*): 1.0860  
 - Final Value (Buy & Hold): 1.3058
 
-![Backtest F1 gb](./figures/backtest_gb_thrF1.png)
+![Backtest F1 gb](https://raw.githubusercontent.com/unyftpte/figure/main/backtest_gb_thrF1.png)
 
 **Top Feature Importance (Model-based)**
 
-![FI gb](./figures/featimp_gb.png)
+![FI gb](https://raw.githubusercontent.com/unyftpte/figure/main/featimp_gb.png)
 
 **Top Permutation Importance (F1)**
 
-![PI gb](./figures/permimp_gb.png)
+![PI gb](https://raw.githubusercontent.com/unyftpte/figure/main/permimp_gb.png)
 
 Top-10 fitur (Permutation Importance, rata-rata):
 
@@ -328,7 +336,7 @@ Top-10 fitur (Permutation Importance, rata-rata):
 - Final Value (Strategy): 1.0616  
 - Final Value (Buy & Hold): 1.3058
 
-![Backtest gb](./figures/backtest_gb.png)
+![Backtest gb](https://raw.githubusercontent.com/unyftpte/figure/main/backtest_gb.png)
 
 ## 7. Kesimpulan
 
@@ -336,9 +344,9 @@ Top-10 fitur (Permutation Importance, rata-rata):
 Pencapaian terhadap Goals: F1 ≥ 0.50.  
 
 **Keterkaitan ke Business Understanding**  
-- Problem terjawab: model memberi probabilitas arah return (besok) → dapat dipakai sebagai sinyal.  
-- Goals: sebagian/seluruhnya tercapai berdasarkan ROC AUC & F1.  
-- Dampak solusi: threshold tuning menunjukkan trade-off P/R dan dampaknya ke backtest (growth of $1).  
+- **Apakah menjawab problem statement?** Ya. Model menghasilkan probabilitas arah return besok (Up/Down) yang bisa dipakai sebagai sinyal.  
+- **Apakah mencapai goals?** Sebagian/seluruhnya tercapai berdasarkan ROC AUC & F1 pada test set.  
+- **Apakah solusi berdampak?** Ya. Threshold tuning mengubah trade-off precision/recall dan terbukti memengaruhi performa strategi (growth of $1) pada backtest periode uji.  
 
 **Rekomendasi**  
 - Walk-forward multi-window; uji stabilitas.  
@@ -364,6 +372,7 @@ Pencapaian terhadap Goals: F1 ≥ 0.50.
 **Sumber Data**
 
 - **Sumber data**: CSV sintetis otomatis (dibuat oleh pipeline jika belum ada).
+
 
 
 <img width="1184" height="582" alt="backtest_logreg_thrF1" src="https://github.com/user-attachments/assets/526df765-f564-4e7f-9cf6-a8fb3b8492d8" />
